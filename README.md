@@ -23,8 +23,9 @@ ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.2-sdk1.0.1      GitHub Actions 
     "ZEPHYR_BLOBS": ""
   },
   "mounts": [
-    "source=zephyr-sdks-cache,target=/workdir/zephyr-sdks,type=volume",
-    "source=ncs-sdks-cache,target=/workdir/ncs-sdks,type=volume"
+    "source=zephyr-sdks,target=/workdir/zephyr-sdks,type=volume",
+    "source=ncs-sdks,target=/workdir/ncs-sdks,type=volume",
+    "source=${localWorkspaceFolderBasename}-cmake-registry,target=/root/.cmake,type=volume"
   ],
   "postStartCommand": "/opt/devcontainer/setup-sdks.sh"
 }
@@ -40,7 +41,7 @@ you ask for on first start.
 
 ## The volume
 
-`zephyr-sdks-cache` is mounted by name with **no project prefix**, so every
+`zephyr-sdks` is mounted by name with **no project prefix**, so every
 project shares it. Zephyr and the SDK are downloaded once per *machine*, not
 once per project: first start ~10 minutes, every start after that seconds and no
 network. Versions install side by side, so switching costs one download and

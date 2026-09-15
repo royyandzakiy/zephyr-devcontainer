@@ -7,6 +7,14 @@
 # volumes, so this has to re-run on every start. Safe to run by hand if the SDK
 # picker comes up empty, then Command Palette -> "nRF Connect: Refresh SDKs".
 #
+# Timing caveat: the extension enumerates the registry once at activation and
+# caches it. postStartCommand runs later, so on a freshly built container the
+# picker falls back to the sources that do not need the registry -- the west
+# topdir of the open folder, $ZEPHYR_BASE, $ZEPHYR_SDK_INSTALL_DIR and nrfutil's
+# own toolchain list -- and everything registry-only goes missing. Mounting
+# /root/.cmake on a volume is what actually fixes that; this script keeps it
+# correct once it exists.
+#
 # /workdir/*/*/ covers both volume stores and skips nrfutil's toolchains/,
 # downloads/ and tmp/ for free. /opt/zephyr-sdks is one level shallower, hence
 # the second glob in each loop.

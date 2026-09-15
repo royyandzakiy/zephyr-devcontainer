@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # postStartCommand: ensure the Zephyr version this project wants is in the shared
 # volume, then register it. First start on a machine takes ~10 min; every start
-# after that, in any project sharing zephyr-sdks-cache, takes seconds.
+# after that, in any project sharing zephyr-sdks, takes seconds.
 #
 # Baked into the devel image at /opt/devcontainer, so a consuming project needs
 # no copy of this file -- only a devcontainer.json.
@@ -157,7 +157,7 @@ container -- the .complete sentinels mean only that part is refetched:
 
 Or start over entirely (full ~10 min download):
 
-    docker volume rm zephyr-sdks-cache
+    docker volume rm zephyr-sdks
 
 HINT
     exit 1
@@ -166,6 +166,11 @@ fi
 # --- Re-register on every start ----------------------------------------------
 # ~/.cmake is in the container's throwaway layer even though the SDK persists, so
 # without this the nRF Connect SDK picker is empty after a rebuild.
+#
+# Note this re-run alone is not sufficient: postStartCommand runs after the
+# extension host has already enumerated, and the picker caches until "nRF
+# Connect: Refresh SDKs". Consumers should also mount /root/.cmake on a volume
+# so the registry is already populated at activation -- see README.
 echo "=== Setting up Zephyr SDK host tools ==="
 # Output captured, not discarded: swallowing it once left an exit-30 "Host tools
 # installation failed" with no explanation anywhere.

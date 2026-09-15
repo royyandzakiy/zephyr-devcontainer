@@ -71,13 +71,8 @@ RUN curl -o actions-runner-linux-x64-2.336.0.tar.gz -L https://github.com/action
 # bakes a pair into it.
 RUN mkdir -p /opt/zephyr-sdks
 
-# The runtime scripts live in the image rather than in each consuming repo --
-# that is the point of this split. A project needs only a devcontainer.json,
-# pointing postStartCommand at /opt/devcontainer/setup-sdks.sh and supplying the
-# config through containerEnv.
-#
-# Trade-off worth knowing: editing one of these now costs a publish and a
-# `docker pull`, where a copied-in script only needed a container restart.
+# Runtime scripts ship in the image, so a project needs only a devcontainer.json.
+# Editing one costs a publish and a `docker pull`.
 COPY scripts/ /opt/devcontainer/
 RUN chmod +x /opt/devcontainer/*.sh /opt/devcontainer/ncs.py \
     && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py; do \
@@ -196,9 +191,7 @@ use-vanilla() {
 
 use-ncs() {
     local target_ver="${1:-v3.3.0}"
-    # Fixed path now that ncs.py ships in the image. It used to be found with
-    # `find /workspaces -name ncs.py`, which needed a copy in every project and
-    # picked an arbitrary one when several were open.
+    # ncs.py ships in the image, so this is a fixed path.
     local script_path=/opt/devcontainer/ncs.py
 
     reset-ncs > /dev/null
