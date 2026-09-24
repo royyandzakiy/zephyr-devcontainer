@@ -34,6 +34,28 @@ if [ -z "${ZEPHYR_STORE_LOCKED:-}" ]; then
     flock -w 1800 9 || { echo "ERROR: timed out waiting for the $STORE lock" >&2; exit 1; }
 fi
 
+# GitHub drops long HTTP/2 transfers on a slow link ("curl 92 ... stream was not
+# closed cleanly: CANCEL", then "early EOF"), which killed the ~10 min Zephyr
+# clone at 24% twice in a row. HTTP/1.1 does not have that failure. Set through
+# the environment so west's own git calls inherit it and ~/.gitconfig is untouched.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1
+
+# Run "$@" up to 3 times. For network steps only -- everything else fails fast.
+retry() {
+    local n
+    for n in 1 2 3; do
+        "$@" && return 0
+        [ "$n" -lt 3 ] && { echo "=== attempt $n failed, retrying in 10s: $* ===" >&2; sleep 10; }
+    done
+    return 1
+}
+
+clone_zephyr() {
+    rm -rf "$WS/zephyr"   # a failed clone leaves a partial checkout behind
+    git clone --depth 1 --branch "$ZEPHYR_VER" \
+        https://github.com/zephyrproject-rtos/zephyr.git "$WS/zephyr"
+}
+
 # --- Zephyr SDK --------------------------------------------------------------
 # `setup.sh -t` is incremental, so re-running against an installed SDK just adds
 # any newly listed toolchain.
@@ -65,11 +87,10 @@ if [ -n "$ZEPHYR_VER" ]; then
         echo "=== Fetching Vanilla Zephyr $ZEPHYR_VER into $WS ==="
         rm -rf "$WS"
         mkdir -p "$WS"
-        git clone --depth 1 --branch "$ZEPHYR_VER" \
-            https://github.com/zephyrproject-rtos/zephyr.git "$WS/zephyr"
+        retry clone_zephyr
         cd "$WS"
         west init -l "$WS/zephyr"
-        west update --narrow -o=--depth=1
+        retry west update --narrow -o=--depth=1
         west zephyr-export
         for m in ${ZEPHYR_BLOBS:-}; do
             echo "=== Fetching binary blobs for $m ==="
