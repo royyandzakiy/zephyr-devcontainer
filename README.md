@@ -39,6 +39,40 @@ version numbers are recovered from those paths, so nothing can desync.
 Pick any Zephyr/SDK pair you like: the devel image ships no SDK and fetches what
 you ask for on first start.
 
+### macOS
+
+The current images run on `linux/amd64` only. To run them on Apple Silicon you
+need to add `--platform=linux/amd64` to `runArgs`, though be aware this runs the
+image emulated and makes builds roughly 3-5x slower.
+
+Another note is that macOS does not allow USB passthrough into a container, so
+the `/dev` mount has to go. You can still build and run `native_sim`, but you
+cannot flash or debug a board directly from the devcontainer. A workaround is
+you can simply open two vscode instances, one without the devcontainer activated, 
+and flash the devcontainer produced firmware image from that instance.
+
+```jsonc
+"runArgs": [
+  "--privileged",
+  "--platform=linux/amd64"
+],
+...
+"mounts": [
+  ...
+  // "source=/dev,target=/dev,type=bind,bind-propagation=rslave"  // remove on macOS
+],
+```
+
+If you want the project to run on both, add a `.devcontainer/macos` folder next
+to the default config. VS Code will ask which one to open.
+
+```
+.devcontainer/
+├── devcontainer.json          Linux / Windows, with USB
+└── macos/
+    └── devcontainer.json      macOS, amd64 emulated, no USB
+```
+
 ## The volume
 
 `zephyr-sdks` is mounted by name with **no project prefix**, so every
