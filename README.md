@@ -5,8 +5,8 @@ that uses them needs **one file** — its own `.devcontainer/devcontainer.json`.
 No scripts to copy, no submodule.
 
 ```
-ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.2-sdk1.0.1   the devcontainer
-ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.2-sdk1.0.1      GitHub Actions `container:`
+ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.0-sdk1.0.1   the devcontainer
+ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.0-sdk1.0.1      GitHub Actions `container:`
 ```
 
 ## Using it in a project
@@ -14,9 +14,9 @@ ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.2-sdk1.0.1      GitHub Actions 
 ```jsonc
 {
   "name": "Zephyr Development",
-  "image": "ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.2-sdk1.0.1",
+  "image": "ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.0-sdk1.0.1",
   "containerEnv": {
-    "ZEPHYR_BASE": "/workdir/zephyr-sdks/v4.4.2/zephyr",
+    "ZEPHYR_BASE": "/workdir/zephyr-sdks/v4.4.0/zephyr",
     "ZEPHYR_SDK_INSTALL_DIR": "/workdir/zephyr-sdks/toolchains/zephyr-sdk-1.0.1",
     "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr",
     "ZSDK_TOOLCHAINS": "arm-zephyr-eabi x86_64-zephyr-elf",
@@ -38,6 +38,40 @@ version numbers are recovered from those paths, so nothing can desync.
 
 Pick any Zephyr/SDK pair you like: the devel image ships no SDK and fetches what
 you ask for on first start.
+
+### macOS
+
+The current images run on `linux/amd64` only. To run them on Apple Silicon you
+need to add `--platform=linux/amd64` to `runArgs`, though be aware this runs the
+image emulated and makes builds roughly 3-5x slower.
+
+Another note is that macOS does not allow USB passthrough into a container, so
+the `/dev` mount has to go. You can still build and run `native_sim`, but you
+cannot flash or debug a board directly from the devcontainer. A workaround is
+you can simply open two vscode instances, one without the devcontainer activated, 
+and flash the devcontainer produced firmware image from that instance.
+
+```jsonc
+"runArgs": [
+  "--privileged",
+  "--platform=linux/amd64"
+],
+...
+"mounts": [
+  ...
+  // "source=/dev,target=/dev,type=bind,bind-propagation=rslave"  // remove on macOS
+],
+```
+
+If you want the project to run on both, add a `.devcontainer/macos` folder next
+to the default config. VS Code will ask which one to open.
+
+```
+.devcontainer/
+├── devcontainer.json          Linux / Windows, with USB
+└── macos/
+    └── devcontainer.json      macOS, amd64 emulated, no USB
+```
 
 ## The volume
 

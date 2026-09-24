@@ -15,7 +15,7 @@ name: Publish container images
 # bug appears fixed in the registry and unfixed on the machine. After such a
 # republish, `docker pull <tag>` is required, not just a container rebuild.
 # If that happens once attendees have pulled, give the tag a build suffix
-# (z4.4.2-sdk1.0.1-2) here and in both devcontainer.json files instead, so the
+# (z4.4.0-sdk1.0.1-2) here and in both devcontainer.json files instead, so the
 # changed reference forces a fetch.
 #
 # Layer cache is registry-backed (a :buildcache tag per package) rather than
