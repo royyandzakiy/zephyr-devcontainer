@@ -12,7 +12,7 @@
 # recoverable from those paths. One source of truth means nothing can desync, so
 # the guard that used to live here is gone.
 #
-#   ZEPHYR_BASE=<store>/v4.4.2/zephyr                    -> ZEPHYR_VERSION=v4.4.2
+#   ZEPHYR_BASE=<store>/v4.4.0/zephyr                    -> ZEPHYR_VERSION=v4.4.0
 #   ZEPHYR_SDK_INSTALL_DIR=<store>/.../zephyr-sdk-1.0.1  -> ZSDK_VERSION=1.0.1
 #   ZSDK_TOOLCHAINS   which SDK toolchains to install
 #   ZEPHYR_BLOBS      modules whose binary blobs to fetch (optional)

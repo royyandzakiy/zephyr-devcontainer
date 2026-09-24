@@ -5,8 +5,8 @@ that uses them needs **one file** — its own `.devcontainer/devcontainer.json`.
 No scripts to copy, no submodule.
 
 ```
-ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.2-sdk1.0.1   the devcontainer
-ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.2-sdk1.0.1      GitHub Actions `container:`
+ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.0-sdk1.0.1   the devcontainer
+ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.0-sdk1.0.1      GitHub Actions `container:`
 ```
 
 ## Using it in a project
@@ -14,9 +14,9 @@ ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.2-sdk1.0.1      GitHub Actions 
 ```jsonc
 {
   "name": "Zephyr Development",
-  "image": "ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.2-sdk1.0.1",
+  "image": "ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.0-sdk1.0.1",
   "containerEnv": {
-    "ZEPHYR_BASE": "/workdir/zephyr-sdks/v4.4.2/zephyr",
+    "ZEPHYR_BASE": "/workdir/zephyr-sdks/v4.4.0/zephyr",
     "ZEPHYR_SDK_INSTALL_DIR": "/workdir/zephyr-sdks/toolchains/zephyr-sdk-1.0.1",
     "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr",
     "ZSDK_TOOLCHAINS": "arm-zephyr-eabi x86_64-zephyr-elf",

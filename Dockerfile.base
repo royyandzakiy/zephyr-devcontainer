@@ -81,7 +81,7 @@ RUN python3 -m venv ${VIRTUAL_ENV} \
 # newer one fails hard on a missing dep (4.4 added jsonschema; on a v4.2.2-pinned
 # venv every build died in zephyr_module.cmake). requirements-doc is excluded
 # (sphinx, several hundred MB).
-ARG ZEPHYR_REQ_REF=v4.4.2
+ARG ZEPHYR_REQ_REF=v4.4.0
 RUN ZREQ="https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/${ZEPHYR_REQ_REF}/scripts" \
     && pip install --no-cache-dir \
       -r "${ZREQ}/requirements-base.txt" \

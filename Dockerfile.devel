@@ -101,7 +101,7 @@ ZEPHYR_STORES=(/workdir/zephyr-sdks /opt/zephyr-sdks)
 
 # Versions are derived from the paths devcontainer.json exported, never hardcoded
 # -- a literal here would override what devcontainer.json sets in every consumer.
-#   ZEPHYR_BASE=<store>/v4.4.2/zephyr -> v4.4.2
+#   ZEPHYR_BASE=<store>/v4.4.0/zephyr -> v4.4.0
 _zephyr_env_version() {
     local b="${ZEPHYR_BASE:-${_ORIG_ZEPHYR_BASE:-}}"
     [ -n "$b" ] || return 0
@@ -139,7 +139,7 @@ use-vanilla() {
     local root base="" sdk=""
 
     if [ -z "$target_ver" ] || [ -z "$sdk_ver" ]; then
-        echo "Usage: use-vanilla <zephyr-version> <sdk-version>   e.g. use-vanilla v4.4.2 1.0.1" >&2
+        echo "Usage: use-vanilla <zephyr-version> <sdk-version>   e.g. use-vanilla v4.4.0 1.0.1" >&2
         echo "       (no default available -- ZEPHYR_BASE/ZEPHYR_SDK_INSTALL_DIR are unset)" >&2
         return 1
     fi
