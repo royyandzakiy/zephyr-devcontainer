@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Run a Zephyr build in Renode, with the board's UART on your terminal.
+#
+#     renode-nrf-run [build-dir] [--gdb[=port]] [--timeout=sec]
+#
+# Zephyr's own run_renode target only exists for boards whose board.cmake sets
+# RENODE_SCRIPT, and nrf52840dk (like most real boards) does not. This fills
+# that gap. The machine description is looked up in order:
+#
+#   <app>/boards/<board>.resc        per-project override, same name Zephyr's
+#                                    renode.cmake uses for its overlay
+#   /opt/devcontainer/emu/<soc>.resc shipped default, from CONFIG_SOC
+#
+# The UART goes to a PTY rather than Renode's log, so output is not interleaved
+# with peripheral warnings and the shell samples get real input. Renode's own
+# log is in <build>/renode.log.
+#
+#   --gdb[=port]    start halted with a GDB server (default 3333); emulation
+#                   runs when GDB continues
+#   --timeout=sec   stop after <sec> seconds -- for CI smoke tests, where the
+#                   output is then grepped
+#
+# RENODE_UART picks the UART (default sysbus.uart0), as Zephyr's board.cmake
+# variable of the same name does.
+set -euo pipefail
+
+# The shipped .resc files sit next to this script (via the /usr/local/bin link).
+EMU_DIR="$(dirname "$(readlink -f "$0")")"
+BUILD=build
+GDB_PORT=""
+TIMEOUT=""
+UART="${RENODE_UART:-sysbus.uart0}"
+
+for a in "$@"; do
+    case "$a" in
+        --gdb)       GDB_PORT=3333 ;;
+        --gdb=*)     GDB_PORT="${a#--gdb=}" ;;
+        --timeout=*) TIMEOUT="${a#--timeout=}" ;;
+        -h|--help)   sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -*)          echo "renode-nrf-run: unknown option $a" >&2; exit 2 ;;
+        *)           BUILD="$a" ;;
+    esac
+done
+
+# Sysbuild puts the application one level down, in the default domain.
+if [ ! -f "$BUILD/zephyr/zephyr.elf" ] && [ -f "$BUILD/domains.yaml" ]; then
+    BUILD="$BUILD/$(awk '/^default:/ {print $2}' "$BUILD/domains.yaml")"
+fi
+BUILD="$(cd "$BUILD" 2>/dev/null && pwd)" || { echo "renode-nrf-run: no build directory $BUILD" >&2; exit 1; }
+ELF="$BUILD/zephyr/zephyr.elf"
+[ -f "$ELF" ] || { echo "renode-nrf-run: $ELF not found -- run west build first" >&2; exit 1; }
+
+cache_get() { sed -n "s/^$1:[A-Z]*=//p" "$BUILD/CMakeCache.txt"; }
+APP_DIR="$(cache_get APPLICATION_SOURCE_DIR)"
+BOARD_FULL="$(cache_get BOARD)"                      # nrf52840dk/nrf52840
+BOARD_NAME="${BOARD_FULL%%/*}"                       # nrf52840dk
+SOC="$(sed -n 's/^CONFIG_SOC="\(.*\)"/\1/p' "$BUILD/zephyr/.config")"
+
+RESC=""
+for c in "$APP_DIR/boards/$BOARD_NAME.resc" \
+         "$APP_DIR/boards/${BOARD_FULL//\//_}.resc" \
+         "$EMU_DIR/$SOC.resc"; do
+    [ -f "$c" ] && { RESC="$c"; break; }
+done
+if [ -z "$RESC" ]; then
+    echo "renode-nrf-run: no Renode machine for $BOARD_FULL (SoC $SOC)." >&2
+    echo "  Add $APP_DIR/boards/$BOARD_NAME.resc, or one of: $(cd "$EMU_DIR" && ls ./*.resc | xargs -n1 basename | tr '\n' ' ')" >&2
+    exit 1
+fi
+
+# The PTY is a symlink, so it goes in /tmp: the build dir is often a bind mount
+# from a Windows or macOS host, where symlinks are unreliable.
+PTY="$(mktemp -u /tmp/renode-uart.XXXXXX)"
+LOG="$BUILD/renode.log"
+rm -f "$PTY"
+
+# Renode does not expand $variables inside quoted strings, so the PTY path is
+# spliced in here rather than passed to the .resc.
+CMDS="\$elf=@$ELF; include @$RESC;"
+CMDS+=" emulation CreateUartPtyTerminal \"uart-term\" \"$PTY\" true;"
+CMDS+=" connector Connect $UART uart-term;"
+if [ -n "$GDB_PORT" ]; then
+    CMDS+=" machine StartGdbServer $GDB_PORT true"
+else
+    CMDS+=" start"
+fi
+
+echo "renode-nrf-run: $BOARD_FULL  ($RESC)"
+# --port -2: no monitor on the console, as Zephyr's run_renode does. With
+# --console Renode would read the monitor from stdin and quit on EOF.
+renode --disable-xwt --port -2 -e "$CMDS" </dev/null >"$LOG" 2>&1 &
+RENODE_PID=$!
+trap 'kill "$RENODE_PID" 2>/dev/null; wait "$RENODE_PID" 2>/dev/null; rm -f "$PTY"' EXIT
+
+# Normally a few seconds. Longer only if Renode has to download something the
+# image did not pre-cache (a platform from a project's own .resc), so say so.
+said_dl=""
+for _ in $(seq 600); do
+    [ -e "$PTY" ] && break
+    kill -0 "$RENODE_PID" 2>/dev/null || { echo "renode-nrf-run: Renode exited early:" >&2; tail -20 "$LOG" >&2; exit 1; }
+    if [ -z "$said_dl" ] && grep -q "Downloading" "$LOG" 2>/dev/null; then
+        echo "renode-nrf-run: Renode is downloading platform files (cached after this run)..."
+        said_dl=1
+    fi
+    sleep 0.2
+done
+[ -e "$PTY" ] || { echo "renode-nrf-run: UART never appeared; see $LOG" >&2; exit 1; }
+
+if [ -n "$GDB_PORT" ]; then
+    echo "renode-nrf-run: halted, GDB server on :$GDB_PORT"
+    echo "  arm-zephyr-eabi-gdb $ELF -ex 'target remote :$GDB_PORT'"
+fi
+
+if [ -n "$TIMEOUT" ]; then
+    timeout "$TIMEOUT" cat "$PTY" || true
+elif [ -t 0 ] && command -v picocom >/dev/null; then
+    echo "renode-nrf-run: UART on $PTY -- exit with Ctrl-A Ctrl-X"
+    picocom -q -b 115200 "$PTY"
+else
+    cat "$PTY"
+fi

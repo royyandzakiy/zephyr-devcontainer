@@ -34,10 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # These live here rather than in Dockerfile.ci because the jobs that flash run
 # `runs-on: [self-hosted, linux]` with no container, on a runner hosted inside
 # THIS image. The GitHub-hosted build jobs never touch hardware.
-RUN curl -fSL "https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil" -o /usr/local/bin/nrfutil \
+#
+# Retried: Nordic's server regularly drops the connection mid-download ("Peer
+# disconnected"), failing whole image builds that were otherwise fine.
+RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "retry $i/5: $*"; sleep $((i * 10)); done; return 1; } \
+    && retry curl -fSL --retry 5 "https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil" -o /usr/local/bin/nrfutil \
     && chmod +x /usr/local/bin/nrfutil \
-    && nrfutil install toolchain-manager \
-    && nrfutil install device
+    && retry nrfutil install toolchain-manager \
+    && retry nrfutil install device
 
 ARG NORDIC_COMMAND_LINE_TOOLS_VERSION="10-24-0/nrf-command-line-tools-10.24.0"
 RUN NCLT_BASE=https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x && \
@@ -74,8 +78,11 @@ RUN mkdir -p /opt/zephyr-sdks
 # Runtime scripts ship in the image, so a project needs only a devcontainer.json.
 # Editing one costs a publish and a `docker pull`.
 COPY scripts/ /opt/devcontainer/
+# emu/ is already in base (the ci image needs it too); copied again here as part
+# of scripts/, which resets its mode, hence the chmod.
 RUN chmod +x /opt/devcontainer/*.sh /opt/devcontainer/ncs.py \
-    && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py; do \
+             /opt/devcontainer/emu/renode-nrf-run /opt/devcontainer/emu/qemu-esp-run \
+    && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py emu/renode-nrf-run emu/qemu-esp-run; do \
          test -x "/opt/devcontainer/$f" || { echo "MISSING /opt/devcontainer/$f"; exit 1; }; \
        done
 
