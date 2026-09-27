@@ -6,6 +6,53 @@
 # GitHub Actions, which development does not want -- here the SDK comes from the
 # shared /workdir volume.
 ARG BASE_IMAGE=zephyr-devcontainer-base:local
+
+# --- Downloads stage ----------------------------------------------------------
+# Everything here is fetched from Nordic or GitHub and needs nothing from base, so
+# it lives in its own stage FROM plain ubuntu. Its cache then survives any change
+# to base or scripts/. When it sat on top of base, every such change re-ran the
+# Nordic downloads, and on a bad link those took 90+ min or failed outright.
+FROM ubuntu:24.04 AS downloads
+
+ARG DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Retried: Nordic's server regularly drops the connection mid-download ("Peer
+# disconnected"), failing whole image builds that were otherwise fine.
+RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "retry $i/5: $*"; sleep $((i * 10)); done; return 1; } \
+    && retry curl -fSL --retry 5 "https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil" -o /usr/local/bin/nrfutil \
+    && chmod +x /usr/local/bin/nrfutil \
+    && retry nrfutil install toolchain-manager \
+    && retry nrfutil install device
+
+# J-Link, from nRF Command Line Tools. Only the extraction and the library links
+# inside /opt/SEGGER happen here; the system-wide parts (/usr/local/bin link,
+# ld.so.conf) are done in the main stage.
+ARG NORDIC_COMMAND_LINE_TOOLS_VERSION="10-24-0/nrf-command-line-tools-10.24.0"
+RUN NCLT_BASE=https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x && \
+    NCLT_TMP=$(mktemp -d) && cd "${NCLT_TMP}" && \
+    wget -qO - "${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-amd64.tar.gz" | tar --no-same-owner -xz && \
+    mkdir -p /opt/SEGGER && \
+    tar xzf JLink_Linux_*x86_64.tgz -C /opt/SEGGER && \
+    mv /opt/SEGGER/JLink_Linux* /opt/SEGGER/JLink && \
+    rm -rf /opt/SEGGER/JLink/x86 /opt/SEGGER/JLink/libjlinkarm_x86.so* && \
+    cd /opt/SEGGER/JLink && \
+    JLINK_SO="$(ls libjlinkarm.so.[0-9]*.[0-9]*.[0-9]* | head -n1)" && \
+    ln -sf "${JLINK_SO}" libjlinkarm.so.7 && \
+    ln -sf libjlinkarm.so.7 libjlinkarm.so && \
+    cd / && rm -rf "${NCLT_TMP}"
+
+WORKDIR /actions-runner
+RUN curl -o actions-runner-linux-x64-2.336.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz \
+    && echo "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d  actions-runner-linux-x64-2.336.0.tar.gz" | sha256sum -c \
+    && tar xzf ./actions-runner-linux-x64-2.336.0.tar.gz \
+    && rm ./actions-runner-linux-x64-2.336.0.tar.gz
+
+# --- Main stage ---------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -14,7 +61,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # clang-tidy here is editor tooling, not a Zephyr SCA variant. Keep the unversioned
 # metapackage: clang-tidy-18 alone installs only the versioned binary name.
 # dfu-util and libusb are for flashing; libffi/libyaml are nrfutil runtime deps.
+# nano/vim-tiny: a terminal editor for when `code` is not there (docker exec,
+# the self-hosted runner). vim-tiny provides `vi`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    nano \
+    vim-tiny \
     clang-format \
     clang-tidy \
     clangd \
@@ -33,27 +84,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --- Hardware tools -----------------------------------------------------------
 # These live here rather than in Dockerfile.ci because the jobs that flash run
 # `runs-on: [self-hosted, linux]` with no container, on a runner hosted inside
-# THIS image. The GitHub-hosted build jobs never touch hardware.
-RUN curl -fSL "https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil" -o /usr/local/bin/nrfutil \
-    && chmod +x /usr/local/bin/nrfutil \
-    && nrfutil install toolchain-manager \
-    && nrfutil install device
-
-ARG NORDIC_COMMAND_LINE_TOOLS_VERSION="10-24-0/nrf-command-line-tools-10.24.0"
-RUN NCLT_BASE=https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x && \
-    NCLT_TMP=$(mktemp -d) && cd "${NCLT_TMP}" && \
-    wget -qO - "${NCLT_BASE}/${NORDIC_COMMAND_LINE_TOOLS_VERSION}_linux-amd64.tar.gz" | tar --no-same-owner -xz && \
-    mkdir -p /opt/SEGGER && \
-    tar xzf JLink_Linux_*x86_64.tgz -C /opt/SEGGER && \
-    mv /opt/SEGGER/JLink_Linux* /opt/SEGGER/JLink && \
-    rm -rf /opt/SEGGER/JLink/x86 /opt/SEGGER/JLink/libjlinkarm_x86.so* && \
-    cd /opt/SEGGER/JLink && \
-    JLINK_SO="$(ls libjlinkarm.so.[0-9]*.[0-9]*.[0-9]* | head -n1)" && \
-    ln -sf "${JLINK_SO}" libjlinkarm.so.7 && \
-    ln -sf libjlinkarm.so.7 libjlinkarm.so && \
-    ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe && \
-    echo "/opt/SEGGER/JLink" > /etc/ld.so.conf.d/SEGGER_JLink.conf && ldconfig && \
-    cd / && rm -rf "${NCLT_TMP}"
+# THIS image. The GitHub-hosted build jobs never touch hardware. Downloaded in the
+# `downloads` stage above; same paths here, so nrfutil's installed components
+# and the relative J-Link library links stay valid.
+COPY --from=downloads /usr/local/bin/nrfutil /usr/local/bin/nrfutil
+COPY --from=downloads /root/.nrfutil /root/.nrfutil
+COPY --from=downloads /opt/SEGGER /opt/SEGGER
+RUN ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe \
+    && echo "/opt/SEGGER/JLink" > /etc/ld.so.conf.d/SEGGER_JLink.conf && ldconfig
 
 # Fail here rather than on someone's first flash if the 32-bit J-Link library
 # won the symlink race.
@@ -61,11 +99,7 @@ RUN JLINK_LIB="$(ldconfig -p | awk '/libjlinkarm\.so\.7/ {print $NF; exit}')" &&
     file -L "${JLINK_LIB}" | grep -q 'ELF 64-bit' && \
     nrfutil device --version
 
-WORKDIR /actions-runner
-RUN curl -o actions-runner-linux-x64-2.336.0.tar.gz -L https://github.com/actions/runner/releases/download/v2.336.0/actions-runner-linux-x64-2.336.0.tar.gz \
-    && echo "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d  actions-runner-linux-x64-2.336.0.tar.gz" | sha256sum -c \
-    && tar xzf ./actions-runner-linux-x64-2.336.0.tar.gz \
-    && rm ./actions-runner-linux-x64-2.336.0.tar.gz
+COPY --from=downloads /actions-runner /actions-runner
 
 # Second SDK store, searched after /workdir. Empty here -- Dockerfile.ci is what
 # bakes a pair into it.
@@ -74,10 +108,15 @@ RUN mkdir -p /opt/zephyr-sdks
 # Runtime scripts ship in the image, so a project needs only a devcontainer.json.
 # Editing one costs a publish and a `docker pull`.
 COPY scripts/ /opt/devcontainer/
+# emu/ is already in base (the ci image needs it too); copied again here as part
+# of scripts/, which resets its mode, hence the chmod.
 RUN chmod +x /opt/devcontainer/*.sh /opt/devcontainer/ncs.py \
-    && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py; do \
+             /opt/devcontainer/emu/renode-nrf-run /opt/devcontainer/emu/qemu-esp-run \
+    && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py emu/renode-nrf-run emu/qemu-esp-run; do \
          test -x "/opt/devcontainer/$f" || { echo "MISSING /opt/devcontainer/$f"; exit 1; }; \
-       done
+       done \
+    && CRLF="$(grep -rl $'\r' /opt/devcontainer || true)" \
+    && { [ -z "$CRLF" ] || { echo "CRLF line endings (would fail at runtime): $CRLF"; exit 1; }; }
 
 WORKDIR /workspaces
 
@@ -94,6 +133,21 @@ if [ -z "$_ORIG_PATH" ]; then
     # reset-ncs unsets the live vars; these keep the project default recoverable.
     export _ORIG_ZEPHYR_BASE="${ZEPHYR_BASE:-}"
     export _ORIG_ZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK_INSTALL_DIR:-}"
+else
+    # An inherited snapshot can predate entries the parent put on PATH later.
+    # VS Code's env probe runs this file BEFORE the server prepends its CLI
+    # directory, then hands the probe's _ORIG_PATH to every terminal -- so the
+    # first use-vanilla/reset-ncs dropped `code` from PATH. Fold such entries
+    # back in, except those use-vanilla/use-ncs add, which all live in a store.
+    _add=""
+    IFS=: read -ra _entries <<< "$PATH"
+    for _e in "${_entries[@]}"; do
+        case ":$_ORIG_PATH:" in *":$_e:"*) continue ;; esac
+        case "$_e" in /workdir/*|/opt/zephyr-sdks/*) continue ;; esac
+        _add="${_add:+$_add:}$_e"
+    done
+    [ -n "$_add" ] && export _ORIG_PATH="$_add:$_ORIG_PATH"
+    unset _add _e _entries
 fi
 
 # Searched in order: shared volume first, then the image's own store.

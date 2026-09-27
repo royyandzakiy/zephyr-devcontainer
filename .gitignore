@@ -1,1 +1,4 @@
 # nothing build-generated lives here; images go to GHCR
+
+# test/emu-smoke.sh and local west builds
+build/

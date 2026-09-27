@@ -1,0 +1,17 @@
+:name: nRF52840
+:description: Default Renode machine for any board on the nRF52840 SoC.
+:
+: Included by renode-nrf-run, which sets $elf beforehand and wires the UART to a
+: PTY afterwards -- so this file only describes the machine. A project can
+: replace it with <app>/boards/<board>.resc (e.g. boards/nrf52840dk.resc) to
+: add sensors or other nodes.
+
+using sysbus
+mach create "nrf52840"
+machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
+
+macro reset
+"""
+    sysbus LoadELF $elf
+"""
+runMacro $reset

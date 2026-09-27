@@ -34,6 +34,65 @@ if [ -z "${ZEPHYR_STORE_LOCKED:-}" ]; then
     flock -w 1800 9 || { echo "ERROR: timed out waiting for the $STORE lock" >&2; exit 1; }
 fi
 
+# GitHub drops long HTTP/2 transfers on a slow link ("curl 92 ... stream was not
+# closed cleanly: CANCEL", then "early EOF"), which killed the ~10 min Zephyr
+# clone at 24% twice in a row. HTTP/1.1 does not have that failure. Set through
+# the environment so west's own git calls inherit it and ~/.gitconfig is untouched.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1
+
+# Run "$@" up to 3 times. For network steps only -- everything else fails fast.
+retry() {
+    local n
+    for n in 1 2 3; do
+        "$@" && return 0
+        [ "$n" -lt 3 ] && { echo "=== attempt $n failed, retrying in 10s: $* ===" >&2; sleep 10; }
+    done
+    return 1
+}
+
+ZEPHYR_URL=https://github.com/zephyrproject-rtos/zephyr.git
+
+# Newest complete Zephyr checkout already in the store, other than the target.
+seed_repo() {
+    local s
+    for s in $(ls -d "$STORE"/v*/zephyr 2>/dev/null | sort -V -r); do
+        [ "$s" = "$WS/zephyr" ] && continue
+        [ -f "$(dirname "$s")/.complete" ] && [ -d "$s/.git" ] && { echo "$s"; return 0; }
+    done
+    return 1
+}
+
+# Start from a Zephyr already on this machine and fetch only this tag: GitHub
+# then sends just what differs. On a link where the full clone died every time
+# ("GnuTLS recv error", "early EOF" after ~10 min, 6 of 6 attempts), this took
+# 11 s. A local clone hardlinks the seed's objects (same volume), and no
+# --shared/--reference, so deleting the seed later cannot break this checkout.
+seed_clone() {
+    local seed="$1" z="$WS/zephyr" r
+    echo "=== Seeding from $seed -- fetching only the $ZEPHYR_VER difference ==="
+    git clone -q --no-checkout "$seed" "$z" &&
+    git -C "$z" remote set-url origin "$ZEPHYR_URL" &&
+    git -C "$z" fetch --depth 1 origin tag "$ZEPHYR_VER" &&
+    git -C "$z" -c advice.detachedHead=false checkout -q "$ZEPHYR_VER" || return 1
+    # Drop what came from the seed, so this looks like a plain
+    # `clone --depth 1 --branch $ZEPHYR_VER` to git log/describe and west.
+    git -C "$z" for-each-ref --format='%(refname)' refs/remotes refs/heads refs/tags |
+        while read -r r; do
+            [ "$r" = "refs/tags/$ZEPHYR_VER" ] || git -C "$z" update-ref -d "$r"
+        done
+}
+
+clone_zephyr() {
+    local seed="$SEED"
+    rm -rf "$WS/zephyr"   # a failed clone leaves a partial checkout behind
+    if [ -n "$seed" ]; then
+        seed_clone "$seed" && return 0
+        echo "=== Seeded fetch failed -- falling back to a full clone ===" >&2
+        rm -rf "$WS/zephyr"
+    fi
+    git clone --depth 1 --branch "$ZEPHYR_VER" "$ZEPHYR_URL" "$WS/zephyr"
+}
+
 # --- Zephyr SDK --------------------------------------------------------------
 # `setup.sh -t` is incremental, so re-running against an installed SDK just adds
 # any newly listed toolchain.
@@ -65,11 +124,16 @@ if [ -n "$ZEPHYR_VER" ]; then
         echo "=== Fetching Vanilla Zephyr $ZEPHYR_VER into $WS ==="
         rm -rf "$WS"
         mkdir -p "$WS"
-        git clone --depth 1 --branch "$ZEPHYR_VER" \
-            https://github.com/zephyrproject-rtos/zephyr.git "$WS/zephyr"
+        SEED="$(seed_repo || true)"
+        retry clone_zephyr
         cd "$WS"
         west init -l "$WS/zephyr"
-        west update --narrow -o=--depth=1
+        # Same idea for the ~50 modules: --path-cache makes west clone each one
+        # from the seed workspace (by path) and fetch only what differs. Most
+        # module revisions do not change between Zephyr patch releases.
+        cache_args=()
+        [ -n "$SEED" ] && cache_args=(--path-cache "$(dirname "$SEED")")
+        retry west update --narrow -o=--depth=1 "${cache_args[@]}"
         west zephyr-export
         for m in ${ZEPHYR_BLOBS:-}; do
             echo "=== Fetching binary blobs for $m ==="

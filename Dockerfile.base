@@ -1,5 +1,6 @@
-# Base image: everything needed to BUILD Zephyr, except the Zephyr SDK.
-# Chain: Dockerfile.base -> Dockerfile.ci -> Dockerfile.devel (see build.sh).
+# Base image: everything needed to BUILD Zephyr, except the Zephyr SDK, plus the
+# emulators to RUN it (Renode, Espressif QEMU). ci and devel are siblings built
+# FROM this one (see build.sh).
 #
 # The SDK and the Zephyr tree are in the shared volume /workdir/zephyr-sdks, not
 # in any image -- setup-sdks.sh installs them on first container start.
@@ -65,7 +66,43 @@ RUN dpkg --add-architecture i386 \
     srecord \
     sudo \
     locales \
+    # Espressif QEMU runtime deps, see below
+    libglib2.0-0t64 \
+    libgcrypt20 \
+    libpixman-1-0 \
+    libslirp0 \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Emulators ----------------------------------------------------------------
+# Here rather than in devel so GitHub Actions jobs in the ci image can run
+# emulated smoke tests too. The SDK's host tools already bring upstream QEMU for
+# the qemu_* boards; these two cover real boards that upstream QEMU cannot.
+#
+# Renode, for nRF52840 (and anything else in its platforms/). The portable
+# build carries its own .NET runtime, so no Mono.
+ARG RENODE_VERSION=1.17.0
+ARG RENODE_SHA256=4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f
+RUN cd /tmp \
+    && wget -q "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz" \
+    && echo "${RENODE_SHA256}  renode-${RENODE_VERSION}.linux-portable.tar.gz" | sha256sum -c \
+    && mkdir -p /opt/renode \
+    && tar xzf "renode-${RENODE_VERSION}.linux-portable.tar.gz" -C /opt/renode --strip-components=1 \
+    && rm "renode-${RENODE_VERSION}.linux-portable.tar.gz" \
+    && ln -s /opt/renode/renode /usr/local/bin/renode
+
+# Espressif's QEMU fork, for ESP32 / ESP32-S3. Linked as qemu-system-xtensa-esp,
+# NOT qemu-system-xtensa: that name must keep resolving to the SDK's QEMU, which
+# the qemu_xtensa board needs and which has no esp32 machine.
+ARG ESP_QEMU_RELEASE=esp-develop-9.2.2-20260417
+ARG ESP_QEMU_FILE=qemu-xtensa-softmmu-esp_develop_9.2.2_20260417-x86_64-linux-gnu.tar.xz
+ARG ESP_QEMU_SHA256=0eecb2a34a5586c0e59110f77b9343b7b336e82fdb0e1a30e1dc1bab8a547e35
+RUN cd /tmp \
+    && wget -q "https://github.com/espressif/qemu/releases/download/${ESP_QEMU_RELEASE}/${ESP_QEMU_FILE}" \
+    && echo "${ESP_QEMU_SHA256}  ${ESP_QEMU_FILE}" | sha256sum -c \
+    && mkdir -p /opt/qemu-esp \
+    && tar xJf "${ESP_QEMU_FILE}" -C /opt/qemu-esp --strip-components=1 \
+    && rm "${ESP_QEMU_FILE}" \
+    && ln -s /opt/qemu-esp/bin/qemu-system-xtensa /usr/local/bin/qemu-system-xtensa-esp
 
 # Ubuntu 24.04 marks the system interpreter externally-managed (PEP 668), so a
 # venv is required, not stylistic.
@@ -107,3 +144,34 @@ RUN set -e; \
     done; \
     west --version && cmake --version | head -1 && \
     python3 -c "import pytest; print('pytest', pytest.__version__)"
+
+# Launchers for the emulators above. Last, so editing a script does not rebuild
+# the layers before it. devel copies scripts/ again to /opt/devcontainer; this
+# subdirectory is the same content either way.
+COPY scripts/emu/ /opt/devcontainer/emu/
+RUN chmod +x /opt/devcontainer/emu/renode-nrf-run /opt/devcontainer/emu/qemu-esp-run \
+    && ln -s /opt/devcontainer/emu/renode-nrf-run /usr/local/bin/renode-nrf-run \
+    && ln -s /opt/devcontainer/emu/qemu-esp-run /usr/local/bin/qemu-esp-run \
+    && RV="$(renode --version)" && echo "${RV%%$'\n'*}" \
+    && QM="$(qemu-system-xtensa-esp -machine help)" \
+    && for m in esp32 esp32s3; do \
+         grep -q "^$m " <<< "$QM" || { echo "MISSING QEMU machine $m"; exit 1; }; \
+       done \
+    && QL="$(ldd /opt/qemu-esp/bin/qemu-system-xtensa)" \
+    && ! grep "not found" <<< "$QL" \
+    && renode-nrf-run --help >/dev/null && qemu-esp-run --help >/dev/null \
+    && CRLF="$(grep -rl $'\r' /opt/devcontainer/emu || true)" \
+    && { [ -z "$CRLF" ] || { echo "CRLF line endings (would fail at runtime): $CRLF"; exit 1; }; }
+
+# Renode downloads a platform's SVD register description on first use and caches
+# it in ~/.config/renode. Fetch them now, for every platform a shipped .resc
+# loads: at runtime the fetch is from dl.antmicro.com, can crawl at ~1 KB/s, and
+# fails offline. (Happened on the first real run: renode-nrf-run timed out.)
+RUN set -e; \
+    for p in $(sed -n 's/.*LoadPlatformDescription @\(\S*\).*/\1/p' /opt/devcontainer/emu/*.resc | sort -u); do \
+        echo "=== warming Renode cache: $p"; \
+        renode --disable-xwt --port -2 -e "mach create; machine LoadPlatformDescription @$p; quit" </dev/null >/tmp/renode-warm.log 2>&1 \
+            || { cat /tmp/renode-warm.log; exit 1; }; \
+    done; \
+    ls /root/.config/renode/cached_binaries/* >/dev/null || { echo "MISSING Renode SVD cache"; exit 1; }; \
+    rm -f /tmp/renode-warm.log

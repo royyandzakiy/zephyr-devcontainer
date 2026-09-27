@@ -79,18 +79,70 @@ to the default config. VS Code will ask which one to open.
 project shares it. Zephyr and the SDK are downloaded once per *machine*, not
 once per project: first start ~10 minutes, every start after that seconds and no
 network. Versions install side by side, so switching costs one download and
-never a re-download.
+never a re-download. Once any version is on the machine, the next one starts
+from it and fetches only the difference from GitHub: seconds instead of ten
+minutes, and far less for a flaky connection to break.
 
 Inside the container: `zephyr-stores` lists what is installed and where,
 `use-vanilla <ver> <sdk>` switches the current shell, `use-ncs <ver>` switches to
 an nRF Connect SDK, `reset-ncs` goes back to baseline.
+
+## Emulation
+
+Both images can run firmware with no board attached. Build as usual, then point
+the launcher at the build directory (`build` by default):
+
+```bash
+west build -b nrf52840dk/nrf52840 app && renode-nrf-run        # Renode
+west build -b esp32_devkitc/esp32/procpu app && qemu-esp-run  # Espressif QEMU
+```
+
+The UART comes up on your terminal. Leave `renode-nrf-run` with Ctrl-A Ctrl-X and
+`qemu-esp-run` with Ctrl-A X. Both launchers also take:
+
+- `--gdb[=port]` starts halted with a GDB server (Renode :3333, QEMU :1234) and
+  prints the GDB command to attach with.
+- `--timeout=sec` exits after that many seconds, for CI. Grep the output:
+  `qemu-esp-run --timeout=10 | grep -q "Hello World"`.
+
+**`renode-nrf-run`** is for boards whose `board.cmake` has no `RENODE_SCRIPT`, which
+means most real boards, `nrf52840dk` included, so Zephyr's `run_renode` target
+does not exist for them. The machine comes from `<app>/boards/<board>.resc` if
+the project has one (same name Zephyr uses), and otherwise from the shipped
+`<soc>.resc`. Only `nrf52840.resc` ships for now. Adding another SoC means adding
+one file in `scripts/emu/`, as long as Renode has a `platforms/cpus/<soc>.repl` for it.
+Pick a different UART with `RENODE_UART=sysbus.uart1`. Renode's own log goes to
+`build/renode.log`.
+
+**`qemu-esp-run`** handles ESP32 and ESP32-S3. It merges `zephyr.bin` into a flash
+image at the offset the build chose, and it writes an eFuse image that reports
+a supported chip revision. Without that image QEMU reports rev 0, and Zephyr
+refuses to boot on rev 0. The emulator is installed as `qemu-system-xtensa-esp`
+so it does not shadow the SDK's `qemu-system-xtensa`. The `qemu_*` boards keep
+using `west build -t run` as before.
+
+Limits:
+- No radio in either emulator: no BLE and no Wi-Fi.
+- Renode's nRF52840 model is partial. Unmodelled registers log a warning to
+  `renode.log` and read back as zero, so check it when a driver misbehaves.
+- `qemu-esp-run` does not take MCUboot builds yet, only simple boot.
+- ESP32-C3/C6 (RISC-V) need Espressif's `qemu-riscv32` fork, which the images
+  do not include.
+
+To get this from VS Code, add these to the project's `.vscode/tasks.json`:
+
+```jsonc
+{ "label": "Run in Renode", "type": "shell", "command": "renode-nrf-run build", "problemMatcher": [] },
+{ "label": "Run in QEMU",   "type": "shell", "command": "qemu-esp-run build", "problemMatcher": [] }
+```
 
 ## The images
 
 `ci` and `devel` are **siblings** off `base`, not a chain — different consumers:
 
 ```
-Dockerfile.base    build tools, Python venv, Zephyr's Python requirements
+Dockerfile.base    build tools, Python venv, Zephyr's Python requirements,
+                   Renode + Espressif QEMU and their launchers
 ├─ Dockerfile.ci     + Zephyr SDK and tree BAKED IN     -> GitHub Actions only
 └─ Dockerfile.devel  + flashing tools, Actions runner,  -> the devcontainer
                        editor tooling, /opt/devcontainer scripts
@@ -118,6 +170,22 @@ WITH_CI=1 bash build.sh    # also ci (large)
 ```
 
 Or open this repo in its own devcontainer, which builds base + devel from source.
+That tests uncommitted Dockerfile changes without publishing anything.
+
+Inside it, `test/emu-smoke.sh` builds `test/app` for nrf52840dk, esp32 and
+esp32s3. It runs each one in its emulator and checks for the boot banner and
+three timer ticks:
+
+```bash
+bash test/emu-smoke.sh            # all targets, PASS/FAIL table at the end
+bash test/emu-smoke.sh nrf        # only targets matching "nrf"
+```
+
+To use the app interactively, it has the Zephyr shell. Try `kernel uptime`:
+
+```bash
+west build -b nrf52840dk/nrf52840 test/app -d build/nrf && renode-nrf-run build/nrf
+```
 
 `versions.env` here is **not** consumer config — it only drives what `ci` bakes
 and how images are tagged.

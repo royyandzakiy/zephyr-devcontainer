@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Run an ESP32 or ESP32-S3 Zephyr build in Espressif's QEMU.
+#
+#     qemu-esp-run [build-dir] [--gdb[=port]] [--timeout=sec]
+#
+# Upstream QEMU (the SDK's, which qemu_xtensa uses) has no esp32 machine, so
+# this runs Espressif's fork, installed as qemu-system-xtensa-esp so it cannot
+# shadow the SDK one. QEMU boots from a whole flash image, not an ELF, so the
+# app is merged into one at the offset the build chose -- read from
+# runners.yaml, since it is 0x1000 on ESP32 and 0x0 on ESP32-S3.
+#
+# The eFuse image makes QEMU report chip revision 3 (ESP32) / 0.3 (ESP32-S3).
+# QEMU's default is revision 0, which Zephyr refuses to boot. Values are
+# ESP-IDF's (tools/idf_py_actions/qemu_ext.py). An existing
+# <build>/qemu_efuse.bin is kept, so eFuses burned in a session persist.
+#
+#   --gdb[=port]    start halted with a GDB server (default 1234)
+#   --timeout=sec   stop after <sec> seconds -- for CI smoke tests
+#
+# No Wi-Fi or Bluetooth: QEMU does not emulate the radio.
+set -euo pipefail
+
+BUILD=build
+GDB_PORT=""
+TIMEOUT=""
+
+for a in "$@"; do
+    case "$a" in
+        --gdb)       GDB_PORT=1234 ;;
+        --gdb=*)     GDB_PORT="${a#--gdb=}" ;;
+        --timeout=*) TIMEOUT="${a#--timeout=}" ;;
+        -h|--help)   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -*)          echo "qemu-esp-run: unknown option $a" >&2; exit 2 ;;
+        *)           BUILD="$a" ;;
+    esac
+done
+
+if [ ! -f "$BUILD/zephyr/zephyr.bin" ] && [ -f "$BUILD/domains.yaml" ]; then
+    BUILD="$BUILD/$(awk '/^default:/ {print $2}' "$BUILD/domains.yaml")"
+fi
+BUILD="$(cd "$BUILD" 2>/dev/null && pwd)" || { echo "qemu-esp-run: no build directory $BUILD" >&2; exit 1; }
+CFG="$BUILD/zephyr/.config"
+RUNNERS="$BUILD/zephyr/runners.yaml"
+BIN="$BUILD/zephyr/zephyr.bin"
+[ -f "$BIN" ] || { echo "qemu-esp-run: $BIN not found -- run west build first" >&2; exit 1; }
+
+if grep -q '^CONFIG_BOOTLOADER_MCUBOOT=y' "$CFG"; then
+    echo "qemu-esp-run: MCUboot builds are not supported yet -- build without it (simple boot)." >&2
+    exit 1
+fi
+
+if grep -q '^CONFIG_SOC_SERIES_ESP32S3=y' "$CFG"; then
+    CHIP=esp32s3; MEM=32M
+    efuse() { python3 -c 'import sys; b=bytearray(1024); b[38]=0x0c; sys.stdout.buffer.write(b)'; }
+elif grep -q '^CONFIG_SOC_SERIES_ESP32=y' "$CFG"; then
+    CHIP=esp32; MEM=4M
+    efuse() { python3 -c 'import sys; b=bytearray(124); b[13]=0x80; b[22]=0x10; sys.stdout.buffer.write(b)'; }
+else
+    echo "qemu-esp-run: $(sed -n 's/^CONFIG_SOC="\(.*\)"/\1/p' "$CFG") is not supported -- only ESP32 and ESP32-S3." >&2
+    exit 1
+fi
+
+runner_arg() { grep -oP -- "--$1=\K\S+" "$RUNNERS" | head -n1; }
+APP_ADDR="$(runner_arg esp-app-address)"
+FLASH_SIZE="$(runner_arg esp-flash-size)"
+[ -n "$APP_ADDR" ] && [ -n "$FLASH_SIZE" ] \
+    || { echo "qemu-esp-run: no --esp-app-address/--esp-flash-size in $RUNNERS" >&2; exit 1; }
+
+FLASH="$BUILD/qemu_flash.bin"
+EFUSE="$BUILD/qemu_efuse.bin"
+esptool --chip "$CHIP" merge-bin --pad-to-size "$FLASH_SIZE" -o "$FLASH" "$APP_ADDR" "$BIN" >/dev/null
+[ -f "$EFUSE" ] || efuse > "$EFUSE"
+
+args=(
+    -nographic
+    -M "$CHIP" -m "$MEM"
+    -drive "file=$FLASH,if=mtd,format=raw"
+    -drive "file=$EFUSE,if=none,format=raw,id=efuse"
+    -global "driver=nvram.$CHIP.efuse,property=drive,value=efuse"
+    # Nothing feeds the TIMG watchdog while halted in GDB.
+    -global "driver=timer.$CHIP.timg,property=wdt_disable,value=true"
+)
+if [ -n "$GDB_PORT" ]; then
+    args+=(-gdb "tcp::$GDB_PORT" -S)
+    echo "qemu-esp-run: halted, GDB server on :$GDB_PORT"
+    echo "  xtensa-espressif_${CHIP}_zephyr-elf-gdb $BUILD/zephyr/zephyr.elf -ex 'target remote :$GDB_PORT'"
+fi
+
+echo "qemu-esp-run: $CHIP, app at $APP_ADDR in $FLASH_SIZE flash -- exit with Ctrl-A X"
+if [ -n "$TIMEOUT" ]; then
+    timeout --foreground "$TIMEOUT" qemu-system-xtensa-esp "${args[@]}" || [ $? -eq 124 ]
+else
+    exec qemu-system-xtensa-esp "${args[@]}"
+fi

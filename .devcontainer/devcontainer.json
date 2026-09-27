@@ -33,8 +33,8 @@
     "source=ncs-sdks,target=/workdir/ncs-sdks,type=volume",
     // CMake package registry -- the nRF Connect SDK picker reads it, and
     // setup-sdks.sh rewrites it too late for a fresh container to see it.
-    "source=${localWorkspaceFolderBasename}-cmake-registry,target=/root/.cmake,type=volume",
-    "source=/dev,target=/dev,type=bind,bind-propagation=rslave"
+    "source=${localWorkspaceFolderBasename}-cmake-registry,target=/root/.cmake,type=volume"
+    // "source=/dev,target=/dev,type=bind,bind-propagation=rslave"
   ],
 
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",

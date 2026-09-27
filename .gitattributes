@@ -1,0 +1,13 @@
+# Everything here runs inside the Linux container, where a CRLF script dies with
+# "$'\r': command not found". Force LF in the working tree regardless of the
+# editor or core.autocrlf (Git for Windows' system config sets it to true).
+# Happened once: register-sdks.sh got saved with CRLF and every setup-sdks.sh
+# run failed at registration.
+*.sh            text eol=lf
+*.py            text eol=lf
+*.resc          text eol=lf
+*.env           text eol=lf
+Dockerfile.*    text eol=lf
+# The emulator launchers have no extension.
+scripts/emu/*   text eol=lf
+test/app/**     text eol=lf
