@@ -159,7 +159,9 @@ RUN chmod +x /opt/devcontainer/emu/renode-nrf-run /opt/devcontainer/emu/qemu-esp
        done \
     && QL="$(ldd /opt/qemu-esp/bin/qemu-system-xtensa)" \
     && ! grep "not found" <<< "$QL" \
-    && renode-nrf-run --help >/dev/null && qemu-esp-run --help >/dev/null
+    && renode-nrf-run --help >/dev/null && qemu-esp-run --help >/dev/null \
+    && CRLF="$(grep -rl $'\r' /opt/devcontainer/emu || true)" \
+    && { [ -z "$CRLF" ] || { echo "CRLF line endings (would fail at runtime): $CRLF"; exit 1; }; }
 
 # Renode downloads a platform's SVD register description on first use and caches
 # it in ~/.config/renode. Fetch them now, for every platform a shipped .resc

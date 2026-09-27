@@ -88,7 +88,9 @@ RUN chmod +x /opt/devcontainer/*.sh /opt/devcontainer/ncs.py \
              /opt/devcontainer/emu/renode-nrf-run /opt/devcontainer/emu/qemu-esp-run \
     && for f in setup-sdks.sh fetch-zephyr.sh register-sdks.sh ncs.py emu/renode-nrf-run emu/qemu-esp-run; do \
          test -x "/opt/devcontainer/$f" || { echo "MISSING /opt/devcontainer/$f"; exit 1; }; \
-       done
+       done \
+    && CRLF="$(grep -rl $'\r' /opt/devcontainer || true)" \
+    && { [ -z "$CRLF" ] || { echo "CRLF line endings (would fail at runtime): $CRLF"; exit 1; }; }
 
 WORKDIR /workspaces
 

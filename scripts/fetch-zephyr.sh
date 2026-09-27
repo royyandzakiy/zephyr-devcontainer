@@ -83,9 +83,9 @@ seed_clone() {
 }
 
 clone_zephyr() {
-    local seed
+    local seed="$SEED"
     rm -rf "$WS/zephyr"   # a failed clone leaves a partial checkout behind
-    if seed="$(seed_repo)"; then
+    if [ -n "$seed" ]; then
         seed_clone "$seed" && return 0
         echo "=== Seeded fetch failed -- falling back to a full clone ===" >&2
         rm -rf "$WS/zephyr"
@@ -124,10 +124,16 @@ if [ -n "$ZEPHYR_VER" ]; then
         echo "=== Fetching Vanilla Zephyr $ZEPHYR_VER into $WS ==="
         rm -rf "$WS"
         mkdir -p "$WS"
+        SEED="$(seed_repo || true)"
         retry clone_zephyr
         cd "$WS"
         west init -l "$WS/zephyr"
-        retry west update --narrow -o=--depth=1
+        # Same idea for the ~50 modules: --path-cache makes west clone each one
+        # from the seed workspace (by path) and fetch only what differs. Most
+        # module revisions do not change between Zephyr patch releases.
+        cache_args=()
+        [ -n "$SEED" ] && cache_args=(--path-cache "$(dirname "$SEED")")
+        retry west update --narrow -o=--depth=1 "${cache_args[@]}"
         west zephyr-export
         for m in ${ZEPHYR_BLOBS:-}; do
             echo "=== Fetching binary blobs for $m ==="
