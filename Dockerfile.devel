@@ -14,7 +14,11 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # clang-tidy here is editor tooling, not a Zephyr SCA variant. Keep the unversioned
 # metapackage: clang-tidy-18 alone installs only the versioned binary name.
 # dfu-util and libusb are for flashing; libffi/libyaml are nrfutil runtime deps.
+# nano/vim-tiny: a terminal editor for when `code` is not there (docker exec,
+# the self-hosted runner). vim-tiny provides `vi`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    nano \
+    vim-tiny \
     clang-format \
     clang-tidy \
     clangd \
@@ -101,6 +105,21 @@ if [ -z "$_ORIG_PATH" ]; then
     # reset-ncs unsets the live vars; these keep the project default recoverable.
     export _ORIG_ZEPHYR_BASE="${ZEPHYR_BASE:-}"
     export _ORIG_ZEPHYR_SDK_INSTALL_DIR="${ZEPHYR_SDK_INSTALL_DIR:-}"
+else
+    # An inherited snapshot can predate entries the parent put on PATH later.
+    # VS Code's env probe runs this file BEFORE the server prepends its CLI
+    # directory, then hands the probe's _ORIG_PATH to every terminal -- so the
+    # first use-vanilla/reset-ncs dropped `code` from PATH. Fold such entries
+    # back in, except those use-vanilla/use-ncs add, which all live in a store.
+    _add=""
+    IFS=: read -ra _entries <<< "$PATH"
+    for _e in "${_entries[@]}"; do
+        case ":$_ORIG_PATH:" in *":$_e:"*) continue ;; esac
+        case "$_e" in /workdir/*|/opt/zephyr-sdks/*) continue ;; esac
+        _add="${_add:+$_add:}$_e"
+    done
+    [ -n "$_add" ] && export _ORIG_PATH="$_add:$_ORIG_PATH"
+    unset _add _e _entries
 fi
 
 # Searched in order: shared volume first, then the image's own store.

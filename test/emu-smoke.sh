@@ -43,7 +43,9 @@ for t in "${TARGETS[@]}"; do
     : > "$dir/emu.out"
     setsid "$launcher" "$dir" --timeout="$RUN_SECS" >> "$dir/emu.out" 2>&1 &
     pid=$!
-    while kill -0 "$pid" 2>/dev/null && ! grep -aq "emu-smoke: tick 3" "$dir/emu.out"; do
+    # 2>/dev/null: on a Windows bind mount, reading a file mid-write can fail
+    # with ENODATA ("No data available"); the next poll reads it fine.
+    while kill -0 "$pid" 2>/dev/null && ! grep -aq "emu-smoke: tick 3" "$dir/emu.out" 2>/dev/null; do
         sleep 0.5
     done
     kill -- -"$pid" 2>/dev/null || true
