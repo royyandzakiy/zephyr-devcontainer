@@ -50,10 +50,47 @@ retry() {
     return 1
 }
 
+ZEPHYR_URL=https://github.com/zephyrproject-rtos/zephyr.git
+
+# Newest complete Zephyr checkout already in the store, other than the target.
+seed_repo() {
+    local s
+    for s in $(ls -d "$STORE"/v*/zephyr 2>/dev/null | sort -V -r); do
+        [ "$s" = "$WS/zephyr" ] && continue
+        [ -f "$(dirname "$s")/.complete" ] && [ -d "$s/.git" ] && { echo "$s"; return 0; }
+    done
+    return 1
+}
+
+# Start from a Zephyr already on this machine and fetch only this tag: GitHub
+# then sends just what differs. On a link where the full clone died every time
+# ("GnuTLS recv error", "early EOF" after ~10 min, 6 of 6 attempts), this took
+# 11 s. A local clone hardlinks the seed's objects (same volume), and no
+# --shared/--reference, so deleting the seed later cannot break this checkout.
+seed_clone() {
+    local seed="$1" z="$WS/zephyr" r
+    echo "=== Seeding from $seed -- fetching only the $ZEPHYR_VER difference ==="
+    git clone -q --no-checkout "$seed" "$z" &&
+    git -C "$z" remote set-url origin "$ZEPHYR_URL" &&
+    git -C "$z" fetch --depth 1 origin tag "$ZEPHYR_VER" &&
+    git -C "$z" -c advice.detachedHead=false checkout -q "$ZEPHYR_VER" || return 1
+    # Drop what came from the seed, so this looks like a plain
+    # `clone --depth 1 --branch $ZEPHYR_VER` to git log/describe and west.
+    git -C "$z" for-each-ref --format='%(refname)' refs/remotes refs/heads refs/tags |
+        while read -r r; do
+            [ "$r" = "refs/tags/$ZEPHYR_VER" ] || git -C "$z" update-ref -d "$r"
+        done
+}
+
 clone_zephyr() {
+    local seed
     rm -rf "$WS/zephyr"   # a failed clone leaves a partial checkout behind
-    git clone --depth 1 --branch "$ZEPHYR_VER" \
-        https://github.com/zephyrproject-rtos/zephyr.git "$WS/zephyr"
+    if seed="$(seed_repo)"; then
+        seed_clone "$seed" && return 0
+        echo "=== Seeded fetch failed -- falling back to a full clone ===" >&2
+        rm -rf "$WS/zephyr"
+    fi
+    git clone --depth 1 --branch "$ZEPHYR_VER" "$ZEPHYR_URL" "$WS/zephyr"
 }
 
 # --- Zephyr SDK --------------------------------------------------------------

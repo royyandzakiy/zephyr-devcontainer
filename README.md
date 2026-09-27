@@ -79,7 +79,9 @@ to the default config. VS Code will ask which one to open.
 project shares it. Zephyr and the SDK are downloaded once per *machine*, not
 once per project: first start ~10 minutes, every start after that seconds and no
 network. Versions install side by side, so switching costs one download and
-never a re-download.
+never a re-download. Once any version is on the machine, the next one starts
+from it and fetches only the difference from GitHub: seconds instead of ten
+minutes, and far less for a flaky connection to break.
 
 Inside the container: `zephyr-stores` lists what is installed and where,
 `use-vanilla <ver> <sdk>` switches the current shell, `use-ncs <ver>` switches to
