@@ -122,7 +122,9 @@ so it does not shadow the SDK's `qemu-system-xtensa`. The `qemu_*` boards keep
 using `west build -t run` as before.
 
 Limits:
-- No radio in either emulator: no BLE and no Wi-Fi.
+- No Wi-Fi or Bluetooth in `qemu-esp-run`: QEMU does not emulate the ESP32 radio.
+  Renode does model the nRF52840 radio, but only between emulated nodes in one
+  Renode session; `renode-nrf-run` starts a single node, so nothing answers it.
 - Renode's nRF52840 model is partial. Unmodelled registers log a warning to
   `renode.log` and read back as zero, so check it when a driver misbehaves.
 - `qemu-esp-run` does not take MCUboot builds yet, only simple boot.
