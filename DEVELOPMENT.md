@@ -1,0 +1,2 @@
+- change emu- naming to emulator-
+- consider to change test/emu-smoke.sh to test/emulator-smoke-test.py (using pytest)
