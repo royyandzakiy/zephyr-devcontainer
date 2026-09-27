@@ -127,6 +127,14 @@ RUN ZREQ="https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/${ZEPHYR_R
       -r "${ZREQ}/requirements-extras.txt" \
       'esptool>=5.0.2'
 
+# Robot Framework and friends, for renode-test -- what Twister runs for a
+# `harness: robot` suite. Without them renode-test stops at "No module named
+# 'robot'". Installed after Zephyr's requirements so pip check below sees both
+# sets together; Renode pins psutil and pyyaml, which Zephyr's ranges accept.
+RUN pip install --no-cache-dir -r /opt/renode/tests/requirements.txt \
+    && pip check \
+    && ln -s /opt/renode/renode-test /usr/local/bin/renode-test
+
 # NOTE the herestrings. `ldconfig -p | grep -q ...` is a trap under the pipefail
 # SHELL above: grep -q exits on first match, ldconfig then dies of SIGPIPE, and
 # pipefail turns the pipeline's status into 141 -- a *successful* match reported
@@ -143,7 +151,9 @@ RUN set -e; \
         command -v "$t" >/dev/null || { echo "MISSING $t"; exit 1; }; \
     done; \
     west --version && cmake --version | head -1 && \
-    python3 -c "import pytest; print('pytest', pytest.__version__)"
+    python3 -c "import pytest; print('pytest', pytest.__version__)" && \
+    python3 -c "import robot; print('robotframework', robot.__version__)" && \
+    command -v renode-test >/dev/null || { echo "MISSING renode-test"; exit 1; }
 
 # Launchers for the emulators above. Last, so editing a script does not rebuild
 # the layers before it. devel copies scripts/ again to /opt/devcontainer; this

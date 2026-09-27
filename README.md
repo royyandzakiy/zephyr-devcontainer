@@ -121,12 +121,22 @@ refuses to boot on rev 0. The emulator is installed as `qemu-system-xtensa-esp`
 so it does not shadow the SDK's `qemu-system-xtensa`. The `qemu_*` boards keep
 using `west build -t run` as before.
 
+**`renode-test`** and Robot Framework are included, so Twister can run
+`harness: robot` suites under Renode. Twister only does that for a board whose
+YAML declares `simulation: - name: renode` and a `testing.renode` block with the
+UART and `.resc`. Most real boards, `nrf52840dk` included, have neither. A board
+extension in the project can add a variant that does, without copying the board.
+
 Limits:
 - No Wi-Fi or Bluetooth in `qemu-esp-run`: QEMU does not emulate the ESP32 radio.
   Renode does model the nRF52840 radio, but only between emulated nodes in one
   Renode session; `renode-nrf-run` starts a single node, so nothing answers it.
 - Renode's nRF52840 model is partial. Unmodelled registers log a warning to
   `renode.log` and read back as zero, so check it when a driver misbehaves.
+- Renode 1.17's GPIOTE model misses the first falling edge on a pin that rests
+  high, such as an active-low button: the `OUTINIT` field of the driver's
+  `CONFIG` write overwrites the pin level the model just sampled. A test can set
+  `OUTINIT` on event-mode channels after boot to correct it.
 - `qemu-esp-run` does not take MCUboot builds yet, only simple boot.
 - ESP32-C3/C6 (RISC-V) need Espressif's `qemu-riscv32` fork, which the images
   do not include.
