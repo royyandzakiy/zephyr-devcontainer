@@ -52,6 +52,13 @@ RUN curl -o actions-runner-linux-x64-2.336.0.tar.gz -L https://github.com/action
     && tar xzf ./actions-runner-linux-x64-2.336.0.tar.gz \
     && rm ./actions-runner-linux-x64-2.336.0.tar.gz
 
+# --- mcumgr cli -------------------------------------------------------------
+FROM golang:1.22-bookworm AS mcumgr
+
+ARG MCUMGR_CLI_COMMIT=5c56bd24066c780aad5836429bfa2ecc4f9a944c
+RUN GOBIN=/out go install "github.com/apache/mynewt-mcumgr-cli/mcumgr@${MCUMGR_CLI_COMMIT}" \
+    && /out/mcumgr version
+
 # --- Main stage ---------------------------------------------------------------
 FROM ${BASE_IMAGE}
 
@@ -98,6 +105,9 @@ RUN ln -s /opt/SEGGER/JLink/JLinkExe /usr/local/bin/JLinkExe \
 RUN JLINK_LIB="$(ldconfig -p | awk '/libjlinkarm\.so\.7/ {print $NF; exit}')" && \
     file -L "${JLINK_LIB}" | grep -q 'ELF 64-bit' && \
     nrfutil device --version
+
+COPY --from=mcumgr /out/mcumgr /usr/local/bin/mcumgr
+RUN mcumgr version
 
 COPY --from=downloads /actions-runner /actions-runner
 

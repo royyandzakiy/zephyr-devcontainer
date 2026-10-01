@@ -156,12 +156,13 @@ To get this from VS Code, add these to the project's `.vscode/tasks.json`:
 Dockerfile.base    build tools, Python venv, Zephyr's Python requirements,
                    Renode + Espressif QEMU and their launchers
 ├─ Dockerfile.ci     + Zephyr SDK and tree BAKED IN     -> GitHub Actions only
-└─ Dockerfile.devel  + flashing tools, Actions runner,  -> the devcontainer
-                       editor tooling, /opt/devcontainer scripts
+└─ Dockerfile.devel  + flashing tools, mcumgr CLI,     -> the devcontainer
+                       Actions runner, editor tooling,
+                       /opt/devcontainer scripts
 ```
 
 `ci` bakes the SDK because a hosted runner has no persistent volume. `devel` does
-not, because it has one. Conversely `ci` carries no nrfutil or J-Link: jobs that
+not, because it has one. Conversely `ci` carries no nrfutil, J-Link or mcumgr: jobs that
 flash run `runs-on: [self-hosted, linux]` with no container, on a runner hosted
 inside the `devel` container.
 
