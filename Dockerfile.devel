@@ -276,6 +276,9 @@ reset-ncs() {
         unset LD_LIBRARY_PATH
     fi
     unset ZEPHYR_BASE ZEPHYR_SDK_INSTALL_DIR NCS_TOOLCHAIN_PATH ZEPHYR_TOOLCHAIN_VARIANT
+    # Set by `nrfutil toolchain-manager env`; NRFUTIL_HOME points nrfutil at the
+    # toolchain's home, which has no toolchain-manager.
+    unset NRFUTIL_HOME PYTHONHOME PYTHONPATH GIT_EXEC_PATH GIT_TEMPLATE_DIR
     echo "Reset environment to container baseline."
 }
 

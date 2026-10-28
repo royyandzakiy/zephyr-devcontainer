@@ -9,6 +9,10 @@ ghcr.io/royyandzakiy/zephyr-devcontainer-devel:z4.4.0-sdk1.0.1   the devcontaine
 ghcr.io/royyandzakiy/zephyr-devcontainer-ci:z4.4.0-sdk1.0.1      GitHub Actions `container:`
 ```
 
+How the parts connect is in [docs/architecture](docs/architecture/01-current.md); why each
+decision was made is in the [decision log](docs/README.md#decision-log), with
+[RFCs](docs/rfc/README.md) and [ADRs](docs/adr/README.md).
+
 ## Using it in a project
 
 ```jsonc
